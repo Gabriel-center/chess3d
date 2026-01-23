@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ascension 3D Chess [OPTIMIZED AI]</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&family=Courier+New:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-screen: #1a1a24;
+            --surface: #c0c0c0;
+            --light: #ffffff;
+            --dark: #808080;
+            --darker: #404040;
+            --highlight: #ffff00;
+            --p-white: #ffffff;
+            --p-black: #202030;
+            
+            /* Dynamic Variables */
+            --bg-alpha: 0.1;
+            --piece-alpha: 0.3;
+            --main-bg-alpha: 0.8;
+            --main-piece-alpha: 1.0;
+            --grid-gap: 0px; 
+        }
+
+        * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg-screen);
+            font-family: 'VT323', monospace;
+            height: 100vh;
+            overflow: hidden;
+            display: flex; flex-direction: column;
+            color: #000;
+        }
+
+        .scanlines {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px; pointer-events: none; z-index: 9999;
+        }
+
+        #menu-toggle {
+            position: fixed; top: 10px; left: 10px; z-index: 100;
+            background: var(--surface); border: 2px outset var(--light);
+            font-family: 'VT323'; font-size: 1.5rem;
+            width: 40px; height: 40px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #menu-toggle:active { border-style: inset; }
+
+        #main-ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column;
+            padding: 10px; transition: transform 0.3s ease-in-out;
+            z-index: 50;
+        }
+        #main-ui.hidden { transform: translateX(-120%); }
+
+        .win-panel {
+            background: var(--surface);
+            border-top: 2px solid var(--light); border-left: 2px solid var(--light);
+            border-right: 2px solid var(--darker); border-bottom: 2px solid var(--darker);
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.5);
+            pointer-events: auto; padding: 5px;
+            max-width: 350px; max-height: 90vh; overflow-y: auto;
+            margin-top: 50px; 
+        }
+
+        .win-title {
+            background: linear-gradient(90deg, #000080, #1084d0);
+            color: white; padding: 2px 5px; font-size: 1.1rem; margin-bottom: 5px;
+            display: flex; justify-content: space-between;
+            transition: background 0.5s;
+        }
+        .win-title.turn-white { background: linear-gradient(90deg, #000080, #1084d0); }
+        .win-title.turn-black { background: linear-gradient(90deg, #400000, #800000); }
+
+        .status-box {
+            background: #fff; border: 2px inset var(--dark);
+            padding: 5px; margin-bottom: 5px; font-family: 'Courier New'; font-weight: bold;
+            font-size: 0.9rem; text-align: center;
+        }
+
+        .controls-group { display: flex; flex-direction: column; gap: 8px; }
+        .control-row { display: flex; flex-direction: column; }
+        .control-row label { font-size: 1rem; font-weight: bold; margin-bottom: 2px; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        select { font-family: 'VT323'; font-size: 1rem; background: #fff; border: 1px solid #000; }
+        
+        button {
+            background: var(--surface); border: 2px outset var(--light);
+            font-family: 'VT323'; font-size: 1.1rem; cursor: pointer;
+            padding: 4px 10px; text-transform: uppercase;
+        }
+        button:active { border-style: inset; }
+        button.active { background: #008080; color: white; border-style: inset; }
+        
+        .section-header {
+            font-size: 0.9rem; color: #555; border-bottom: 1px solid #888; 
+            margin-top: 5px; margin-bottom: 2px;
+        }
+
+        /* 3D SCENE */
+        #scene-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            perspective: 1200px; z-index: 0; overflow: hidden;
+            background-image: 
+                linear-gradient(rgba(0, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 50px 50px;
+            cursor: grab;
+        }
+        #scene-container:active { cursor: grabbing; }
+
+        #board-pivot {
+            position: relative;
+            transform-style: preserve-3d;
+            width: 0; height: 0;
+        }
+        
+        #board-pivot.notransition .layer-plane { transition: none !important; }
+
+        /* LAYERS */
+        .layer-plane {
+            position: absolute;
+            display: grid;
+            grid-template-columns: repeat(8, 35px);
+            grid-template-rows: repeat(8, 35px);
+            gap: var(--grid-gap); 
+            transform-style: preserve-3d;
+            transition: transform 0.3s; 
+            margin-left: -140px; margin-top: -140px;
+        }
+
+        .cell {
+            width: 35px; height: 35px;
+            border: 1px solid;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px; font-weight: bold;
+            position: relative;
+            cursor: pointer;
+            backface-visibility: visible;
+            transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
+        }
+
+        /* ACTIVE STYLES */
+        .layer-plane[data-active="true"] .cell { border-color: rgba(128,128,128,0.5); }
+        .layer-plane[data-active="true"] .cell.dark { background-color: rgba(0,0,0, var(--main-bg-alpha)); }
+        .layer-plane[data-active="true"] .cell.light { background-color: rgba(255,255,255, var(--main-bg-alpha)); }
+        .layer-plane[data-active="true"] .piece { opacity: var(--main-piece-alpha); filter: drop-shadow(0 0 2px rgba(255,255,255,0.8)); }
+
+        /* INACTIVE STYLES */
+        .layer-plane[data-active="false"] .cell { border-color: rgba(128,128,128, var(--bg-alpha)); }
+        .layer-plane[data-active="false"] .cell.dark { background-color: rgba(0,0,0, var(--bg-alpha)); }
+        .layer-plane[data-active="false"] .cell.light { background-color: rgba(255,255,255, var(--bg-alpha)); }
+        .layer-plane[data-active="false"] .piece { opacity: var(--piece-alpha); }
+
+        /* LAST MOVE */
+        .layer-plane[data-active="false"] .cell.last-move { 
+            background-color: rgba(200, 0, 255, var(--main-bg-alpha)) !important; 
+            border-color: rgba(221, 0, 255, var(--main-bg-alpha)) !important;
+        }
+        .layer-plane[data-active="false"] .cell.last-move .piece {
+            opacity: var(--main-piece-alpha) !important;
+        }
+
+        /* PIECES */
+        .piece { 
+            transform: translateZ(1px); 
+            pointer-events: none; 
+            transition: opacity 0.2s; 
+            paint-order: stroke fill;
+        }
+        .piece.white { color: var(--p-white); -webkit-text-stroke: 1.5px #000; }
+        .piece.black { color: var(--p-black); font-weight: 900; -webkit-text-stroke: 1.5px #fff; }
+
+        @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 0.7; } 100% { opacity: 0.4; } }
+
+        /* HIGHLIGHTS */
+        .layer-plane[data-active="false"] .cell.valid-move { background-color: rgba(255, 255, 0, 0.4) !important; border-color: #ff0; pointer-events: auto !important; }
+        .layer-plane[data-active="false"] .cell.capture-move { background-color: rgba(255, 0, 0, 0.4) !important; border-color: #f00; pointer-events: auto !important; }
+        
+        .cell.valid-move { background-color: rgba(255, 255, 0, 0.5) !important; box-shadow: inset 0 0 5px #ff0; pointer-events: auto !important; animation: pulse 2s infinite; }
+        .cell.capture-move { background-color: rgba(255, 0, 0, 0.5) !important; box-shadow: inset 0 0 5px #f00; pointer-events: auto !important; animation: pulse 1s infinite; }
+        .cell.selected { background-color: rgba(0, 255, 255, 0.6) !important; border: 2px solid #0ff; }
+        
+        .cell.last-move { 
+            background-color: rgba(200, 0, 255, 0.5) !important; 
+            box-shadow: inset 0 0 10px #d0f; 
+            border-color: #d0f !important; 
+        }
+
+        /* CHECK INDICATOR */
+        .check-indicator {
+            position: absolute; top: -5px; right: -5px;
+            color: #ff0000; font-weight: bold; font-size: 28px;
+            text-shadow: 0 0 2px #fff, 0 0 5px #f00; 
+            z-index: 20; pointer-events: none;
+            animation: blink 0.3s infinite alternate;
+        }
+        @keyframes blink { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0.7; transform: scale(1.2); } }
+
+        .layer-plane::after {
+            content: attr(data-index);
+            position: absolute; right: -30px; top: 50%; 
+            color: #0f0; font-size: 12px; transform: rotateY(90deg);
+        }
+
+        /* --- INDICATORS --- */
+        #auto-pilot-label {
+            position: fixed; bottom: 10px; right: 10px;
+            color: #0f0; font-family: 'Courier New'; font-size: 0.8rem;
+            text-shadow: 0 0 2px #0f0; pointer-events: none; display: none;
+        }
+
+        #slice-mode-label {
+            position: fixed; bottom: 30px; right: 10px;
+            color: #ff00ff; font-family: 'Courier New'; font-size: 0.9rem;
+            text-shadow: 0 0 2px #f0f; pointer-events: none;
+            text-transform: uppercase;
+        }
+
+        #turn-piece-indicator {
+            position: fixed; bottom: 55px; right: 10px;
+            font-size: 5rem; line-height: 1;
+            cursor: pointer; z-index: 100;
+            user-select: none;
+            transition: color 0.3s, text-shadow 0.3s;
+            paint-order: stroke fill;
+        }
+        #turn-piece-indicator:active { transform: scale(0.95); }
+        
+        #turn-piece-indicator.white {
+            color: var(--p-white);
+            -webkit-text-stroke: 2px #000;
+            filter: drop-shadow(0 0 5px rgba(255,255,255,0.5));
+        }
+        #turn-piece-indicator.black {
+            color: var(--p-black);
+            -webkit-text-stroke: 2px #fff;
+            filter: drop-shadow(0 0 5px rgba(0,0,0,0.8));
+        }
+
+        /* AI THINKING OVERLAY - TOP RIGHT */
+        #ai-thinking {
+            position: fixed; top: 10px; right: 10px;
+            background: rgba(0,0,0,0.8);
+            border: 2px solid #0f0;
+            color: #0f0;
+            padding: 10px 20px;
+            font-size: 1.5rem;
+            font-family: 'VT323';
+            display: none;
+            z-index: 200;
+            box-shadow: 0 0 10px #0f0;
+            animation: blink 1s infinite;
+        }
+
+        .checkbox-row { display: flex; align-items: center; gap: 5px; font-size: 0.9em; color: #333; }
+        
+        #turn-display {
+            display: flex; justify-content: center; align-items: center; gap: 10px;
+            font-size: 1.2rem; margin-top: 5px; border-top: 1px solid #999; padding-top: 5px;
+        }
+        .turn-box { padding: 2px 8px; border: 2px solid #000; font-weight: bold; opacity: 0.3; }
+        .turn-box.active { opacity: 1; box-shadow: 0 0 5px #fff; }
+        .turn-white.active { background: #fff; color: #000; border-color: #000; }
+        .turn-black.active { background: #000; color: #fff; border-color: #fff; }
+
+    </style>
+</head>
+<body>
+    <div class="scanlines"></div>
+
+    <button id="menu-toggle" onclick="visuals.toggleMenu()">☰</button>
+
+    <div id="scene-container">
+        <div id="board-pivot"></div>
+    </div>
+
+    <!-- AI THINKING INDICATOR -->
+    <div id="ai-thinking">AI PROCESSING...</div>
+
+    <div id="main-ui">
+        <div class="win-panel">
+            <div class="win-title" id="win-title-bar">
+                <span>ASCENSION_CONFIG.SYS</span>
+                <span style="cursor:pointer;" onclick="game.resetGame()">[RESET]</span>
+            </div>
+            
+            <div class="status-box" id="game-status">SYSTEM READY</div>
+            
+            <div id="turn-display">
+                <div id="tb-white" class="turn-box turn-white active">WHITE</div>
+                <div id="tb-black" class="turn-box turn-black">BLACK</div>
+            </div>
+
+            <!-- GAME MODE CONTROLS -->
+            <div class="controls-group" style="margin-top: 10px; border-top: 1px solid #999; padding-top: 5px;">
+                <div class="control-row">
+                    <label>WHITE PLAYER:</label>
+                    <select id="white-mode">
+                        <option value="human">HUMAN</option>
+                        <option value="easy">AI (EASY)</option>
+                        <option value="normal">AI (NORMAL)</option>
+                        <option value="hard">AI (HARD)</option>
+                    </select>
+                </div>
+                <div class="control-row">
+                    <label>BLACK PLAYER:</label>
+                    <select id="black-mode">
+                        <option value="human">HUMAN</option>
+                        <option value="easy">AI (EASY)</option>
+                        <option value="normal">AI (NORMAL)</option>
+                        <option value="hard">AI (HARD)</option>
+                    </select>
+                </div>
+                <button id="ai-toggle-btn" onclick="visuals.toggleAiState()">ENABLE AI: OFF</button>
+            </div>
+
+            <div class="status-box" style="font-size: 0.8em; color: #333; margin-top:5px;">RIGHT CLICK TO CHANGE AXIS</div>
+
+            <div class="controls-group">
+                <div class="control-row">
+                    <label><span id="focus-label">FOCUS LEVEL</span>: <span id="lvl-display">0</span></label>
+                    <input type="range" id="level-slider" min="0" max="7" value="0">
+                </div>
+                
+                <div class="control-row">
+                    <label>LAYER SPACING</label>
+                    <input type="range" id="spacing-slider" min="10" max="150" value="40">
+                </div>
+
+                <div class="control-row">
+                    <label>BOARD EXPLODE: <span id="explode-val">0</span>px</label>
+                    <input type="range" id="explode-slider" min="0" max="20" value="0">
+                </div>
+
+                <div class="section-header">ACTIVE LAYER VISIBILITY</div>
+                <div class="control-row">
+                    <label>BOARD: <span id="main-bg-op-val">80</span>%</label>
+                    <input type="range" id="main-bg-opacity-slider" min="0" max="100" value="80">
+                </div>
+                <div class="control-row">
+                    <label>PIECE: <span id="main-piece-op-val">100</span>%</label>
+                    <input type="range" id="main-piece-opacity-slider" min="0" max="100" value="100">
+                </div>
+                <button id="link-main-btn" onclick="visuals.toggleLinkMain()">LINK ACTIVE: OFF</button>
+
+                <div class="section-header">OFF-LAYER VISIBILITY</div>
+                <div class="control-row">
+                    <label>BOARD: <span id="bg-op-val">10</span>%</label>
+                    <input type="range" id="bg-opacity-slider" min="0" max="100" value="10">
+                </div>
+                <div class="control-row">
+                    <label>PIECE: <span id="piece-op-val">30</span>%</label>
+                    <input type="range" id="piece-opacity-slider" min="0" max="100" value="30">
+                </div>
+                <button id="link-off-btn" onclick="visuals.toggleLinkOff()">LINK OFF-LAYER: OFF</button>
+
+                <div style="display:flex; gap:5px; margin-top:10px;">
+                    <button onclick="visuals.zoom(0.1)">ZOOM +</button>
+                    <button onclick="visuals.zoom(-0.1)">ZOOM -</button>
+                    <button onclick="visuals.resetView()">CENTER</button>
+                </div>
+                
+                <div class="checkbox-row" style="margin-top: 5px;">
+                    <input type="checkbox" id="opaque-check" checked>
+                    <label for="opaque-check">Click thru layers</label>
+                </div>
+                
+                <div class="checkbox-row">
+                    <input type="checkbox" id="autorotate-check" checked>
+                    <label for="autorotate-check">Auto-Rotate</label>
+                </div>
+
+                <button onclick="visuals.toggleMenu()" style="margin-top:5px;">HIDE MENU</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- BIG TURN PIECE INDICATOR -->
+    <div id="turn-piece-indicator" class="white" onclick="visuals.cycleTurnPiece()">♚</div>
+
+    <div id="slice-mode-label">VIEW: LEVELS</div>
+    <div id="auto-pilot-label">AUTO-ROTATION ACTIVE</div>
+
+<script>
+const SOLID_CONFIG = { chars: { 'K':'♚','Q':'♛','R':'♜','B':'♝','N':'♞','P':'♟', 'k':'♚','q':'♛','r':'♜','b':'♝','n':'♞','p':'♟' } };
+
+// --- CHESS LOGIC ---
+class ChessLogic {
+    constructor() {
+        this.board = []; this.turn = 'white'; this.kings = { white: [], black: [] }; 
+        this.gameOver = false; 
+        this.lastMove = null; 
+        this.epTarget = null;
+        this.checks = { white: new Set(), black: new Set() };
+        this.initBoard();
+    }
+    
+    initBoard() {
+        this.board = Array(8).fill(null).map(() => Array(8).fill(null).map(() => Array(8).fill(null)));
+        this.kings = { white: [], black: [] };
+        this.lastMove = null; this.epTarget = null;
+        this.checks = { white: new Set(), black: new Set() };
+
+        const layout = [
+            "RRNBBNRR", // Level 7
+            "RRBNNBRR", // Level 6
+            "NBQQQQBN", // Level 5
+            "BNQKKQNB", // Level 4
+            "BNQKKQNB", // Level 3
+            "NBQQQQBN", // Level 2
+            "RRBNNBRR", // Level 1
+            "RRNBBNRR"  // Level 0
+        ];
+
+        for (let l_vis = 0; l_vis < 8; l_vis++) {
+            const level = 7 - l_vis;
+            const rowStr = layout[l_vis];
+            for (let r = 0; r < 8; r++) {
+                const type = rowStr[r];
+                this.placePiece(type, 'white', level, r, 0);
+                this.placePiece('P', 'white', level, r, 1);
+                this.placePiece(type, 'black', level, r, 7);
+                this.placePiece('P', 'black', level, r, 6);
+            }
+        }
+    }
+
+    // CLONE Optimized: Manual Copy
+    clone() {
+        const newLogic = new ChessLogic();
+        // Manual deep copy of board array to avoid JSON overhead
+        for(let l=0; l<8; l++) for(let r=0; r<8; r++) {
+            newLogic.board[l][r] = [...this.board[l][r]];
+        }
+        newLogic.turn = this.turn;
+        newLogic.gameOver = this.gameOver;
+        newLogic.epTarget = this.epTarget ? {...this.epTarget} : null;
+        newLogic.kings = { white: [], black: [] };
+        for(let l=0; l<8; l++) for(let r=0; r<8; r++) for(let f=0; f<8; f++) {
+            const p = newLogic.board[l][r][f];
+            if(p && p.type === 'K') newLogic.kings[p.color].push({l,r,f,id:p.id});
+        }
+        return newLogic;
+    }
+
+    placePiece(type, color, l, r, f) {
+        const id = `${color.charAt(0)}_${type}_${l}${r}${f}_${Math.random().toString(36).substr(2, 5)}`;
+        const piece = { type: type.toUpperCase(), color, id, hasMoved: false };
+        this.board[l][r][f] = piece;
+        if(piece.type === 'K') this.kings[color].push({l,r,f,id});
+    }
+    isValid(l, r, f) { return l>=0 && l<8 && r>=0 && r<8 && f>=0 && f<8; }
+    
+    isSquareAttacked(l, r, f, attackerColor) {
+        for(let al=0; al<8; al++) for(let ar=0; ar<8; ar++) for(let af=0; af<8; af++) {
+            const p = this.board[al][ar][af];
+            if(p && p.color === attackerColor) {
+                if (p.type === 'P') {
+                    const fwd = p.color === 'white' ? 1 : -1;
+                    const capOffsets = [[1,0], [-1,0], [0,1], [0,-1], [1,1], [1,-1], [-1,1], [-1,-1]];
+                    for(let o of capOffsets) {
+                        if (al+o[0]===l && ar+o[1]===r && af+fwd===f) return true;
+                    }
+                } else {
+                    const moves = this.getMoves(al, ar, af);
+                    if (moves.some(m => m.l===l && m.r===r && m.f===f)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    detectChecks() {
+        this.checks.white.clear();
+        this.checks.black.clear();
+        this.kings.white.forEach(k => { if(this.isSquareAttacked(k.l, k.r, k.f, 'black')) this.checks.white.add(k.id); });
+        this.kings.black.forEach(k => { if(this.isSquareAttacked(k.l, k.r, k.f, 'white')) this.checks.black.add(k.id); });
+    }
+
+    getAllValidMoves(color) {
+        let moves = [];
+        for(let l=0; l<8; l++) for(let r=0; r<8; r++) for(let f=0; f<8; f++) {
+            const p = this.board[l][r][f];
+            if(p && p.color === color) {
+                const pieceMoves = this.getMoves(l, r, f);
+                pieceMoves.forEach(m => {
+                    moves.push({ from: {l,r,f}, to: m });
+                });
+            }
+        }
+        // OPTIMIZATION: Sort Captures first for Alpha-Beta pruning
+        moves.sort((a, b) => (b.to.capture ? 1 : 0) - (a.to.capture ? 1 : 0));
+        return moves;
+    }
+
+    getMoves(l, r, f) {
+        const p = this.board[l][r][f]; if(!p) return [];
+        let moves = [];
+        const fwd = p.color === 'white' ? 1 : -1;
+        if (p.type === 'P') {
+            if(this.isValid(l,r,f+fwd) && !this.board[l][r][f+fwd]) {
+                moves.push({l,r,f:f+fwd, capture:false});
+                if ((p.color==='white' && f===1) || (p.color==='black' && f===6)) {
+                    if(this.isValid(l,r,f+fwd*2) && !this.board[l][r][f+fwd*2]) moves.push({l,r,f:f+fwd*2, capture:false});
+                }
+            }
+            const capOffsets = [[1,0], [-1,0], [0,1], [0,-1], [1,1], [1,-1], [-1,1], [-1,-1]];
+            capOffsets.forEach(([dl, dr]) => {
+                const tl=l+dl, tr=r+dr, tf=f+fwd;
+                if(this.isValid(tl, tr, tf)) {
+                    const t = this.board[tl][tr][tf];
+                    if(t && t.color !== p.color) {
+                        moves.push({l:tl, r:tr, f:tf, capture:true});
+                    } else if (this.epTarget && this.epTarget.l===tl && this.epTarget.r===tr && this.epTarget.f===tf) {
+                        moves.push({l:tl, r:tr, f:tf, capture:true, isEp:true});
+                    }
+                }
+            });
+        } else {
+            const vectors = [];
+            if(p.type==='R' || p.type==='Q') vectors.push([1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]);
+            if(p.type==='B' || p.type==='Q') vectors.push([1,1,0],[1,-1,0],[-1,1,0],[-1,-1,0],[0,1,1],[0,1,-1],[0,-1,1],[0,-1,-1],[1,0,1],[1,0,-1],[-1,0,1],[-1,0,-1]);
+            if(p.type==='N') [[1,2],[1,-2],[-1,2],[-1,-2],[2,1],[2,-1],[-2,1],[-2,-1]].forEach(([a,b])=> vectors.push([a,b,0], [a,0,b], [0,a,b]));
+            if(p.type==='K') for(let dl=-1; dl<=1; dl++) for(let dr=-1; dr<=1; dr++) for(let df=-1; df<=1; df++) if(dl||dr||df) vectors.push([dl,dr,df]);
+            const isSlide = (p.type==='R' || p.type==='B' || p.type==='Q');
+            vectors.forEach(([dl, dr, df]) => {
+                let cl=l, cr=r, cf=f;
+                while(true) {
+                    cl+=dl; cr+=dr; cf+=df;
+                    if(!this.isValid(cl,cr,cf)) break;
+                    const t = this.board[cl][cr][cf];
+                    if(!t) { moves.push({l:cl, r:cr, f:cf, capture:false}); if(!isSlide) break; }
+                    else { if(t.color !== p.color) moves.push({l:cl, r:cr, f:cf, capture:true}); break; }
+                }
+            });
+        }
+        return moves;
+    }
+    
+    move(from, to) {
+        const p = this.board[from.l][from.r][from.f];
+        let target = this.board[to.l][to.r][to.f];
+        this.lastMove = { from: { ...from }, to: { ...to } };
+
+        let isEpCapture = false;
+        if(p.type === 'P' && !target && to.f !== from.f) {
+            const fwd = p.color === 'white' ? 1 : -1;
+            const victimF = to.f - fwd;
+            target = this.board[to.l][to.r][victimF]; 
+            this.board[to.l][to.r][victimF] = null;
+        }
+
+        if(target && target.type === 'K') {
+            this.kings[target.color] = this.kings[target.color].filter(k => k.id !== target.id);
+            if(this.kings[target.color].length === 0) this.gameOver = true;
+        }
+
+        this.epTarget = null;
+        if(p.type === 'P' && Math.abs(to.f - from.f) === 2) {
+            const fwd = p.color === 'white' ? 1 : -1;
+            this.epTarget = { l: from.l, r: from.r, f: from.f + fwd };
+        }
+
+        this.board[to.l][to.r][to.f] = p; this.board[from.l][from.r][from.f] = null;
+        p.hasMoved = true;
+        if(p.type === 'P' && ((p.color==='white' && to.f===7) || (p.color==='black' && to.f===0))) p.type = 'Q';
+        if(p.type === 'K') { const kObj = this.kings[p.color].find(k => k.id === p.id); if(kObj) { kObj.l=to.l; kObj.r=to.r; kObj.f=to.f; } }
+        
+        this.turn = this.turn === 'white' ? 'black' : 'white';
+        this.detectChecks();
+        
+        return { gameOver: this.gameOver, winner: this.gameOver ? p.color : null };
+    }
+}
+
+// --- OPTIMIZED AI ENGINE ---
+class ChessAI {
+    constructor() {
+        this.pieceValues = { 'P': 10, 'N': 30, 'B': 30, 'R': 50, 'Q': 90, 'K': 900 };
+        this.lastFrameTime = 0;
+    }
+
+    // Time Slicer: Yield to UI every 10ms
+    async yieldToUI() {
+        if (performance.now() - this.lastFrameTime > 10) {
+            await new Promise(r => setTimeout(r, 0));
+            this.lastFrameTime = performance.now();
+        }
+    }
+
+    async computeMove(logic, difficulty) {
+        this.lastFrameTime = performance.now();
+        const moves = logic.getAllValidMoves(logic.turn);
+        if (moves.length === 0) return null;
+
+        if (difficulty === 'easy') {
+            return moves[Math.floor(Math.random() * moves.length)];
+        } 
+        else if (difficulty === 'normal') {
+            let bestScore = -Infinity;
+            let bestMoves = [];
+            for (let move of moves) {
+                await this.yieldToUI(); // prevent freeze
+                const sim = logic.clone();
+                sim.move(move.from, move.to);
+                const score = this.evaluateBoard(sim, logic.turn);
+                if (score > bestScore) { bestScore = score; bestMoves = [move]; }
+                else if (score === bestScore) bestMoves.push(move);
+            }
+            return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+        } 
+        else if (difficulty === 'hard') {
+            let bestScore = -Infinity;
+            let bestMove = moves[0];
+            // Depth 2 with Alpha-Beta and Move Ordering
+            for (let move of moves) {
+                await this.yieldToUI(); // prevent freeze
+                const sim = logic.clone();
+                sim.move(move.from, move.to);
+                // Depth 1 recursive call (Total Depth 2)
+                const score = await this.minimaxAsync(sim, 1, false, -Infinity, Infinity, logic.turn);
+                if (score > bestScore) { bestScore = score; bestMove = move; }
+            }
+            return bestMove;
+        }
+        return moves[0];
+    }
+
+    async minimaxAsync(logic, depth, isMaximizing, alpha, beta, myColor) {
+        if (depth === 0 || logic.gameOver) return this.evaluateBoard(logic, myColor);
+        
+        // Check yields inside recursion to prevent deep freeze
+        await this.yieldToUI();
+
+        const moves = logic.getAllValidMoves(logic.turn);
+        if (moves.length === 0) return isMaximizing ? -Infinity : Infinity;
+
+        if (isMaximizing) {
+            let maxEval = -Infinity;
+            for (let move of moves) {
+                const sim = logic.clone();
+                sim.move(move.from, move.to);
+                const ev = await this.minimaxAsync(sim, depth - 1, false, alpha, beta, myColor);
+                maxEval = Math.max(maxEval, ev);
+                alpha = Math.max(alpha, ev);
+                if (beta <= alpha) break;
+            }
+            return maxEval;
+        } else {
+            let minEval = Infinity;
+            for (let move of moves) {
+                const sim = logic.clone();
+                sim.move(move.from, move.to);
+                const ev = await this.minimaxAsync(sim, depth - 1, true, alpha, beta, myColor);
+                minEval = Math.min(minEval, ev);
+                beta = Math.min(beta, ev);
+                if (beta <= alpha) break;
+            }
+            return minEval;
+        }
+    }
+
+    evaluateBoard(logic, myColor) {
+        let score = 0;
+        for(let l=0; l<8; l++) for(let r=0; r<8; r++) for(let f=0; f<8; f++) {
+            const p = logic.board[l][r][f];
+            if (p) {
+                let val = this.pieceValues[p.type];
+                if (l>=3 && l<=4 && r>=3 && r<=4 && f>=3 && f<=4) val += 5; // Center control
+                if (p.type === 'P') val += (p.color === 'white' ? f : (7 - f)) * 2; // Advance
+                if (p.color === myColor) score += val; else score -= val;
+            }
+        }
+        return score;
+    }
+}
+
+// --- VISUAL & UI ENGINE ---
+class VisualEngine {
+    constructor(gameLogic) {
+        this.game = gameLogic;
+        this.ai = new ChessAI();
+        this.pivot = document.getElementById('board-pivot');
+        this.layers = []; this.cells = [];
+        this.selected = null; this.highlights = [];
+        
+        this.config = {
+            focusLevel: 0, layerSpacing: 40, zoomLevel: 1.0, opaqueClick: true,
+            bgAlpha: 10, pieceAlpha: 30, 
+            mainBgAlpha: 80, mainPieceAlpha: 100,
+            explodeGap: 0,
+            rotX: -20, rotY: 30, autoRotate: true,
+            sliceMode: 0, 
+            linkedMain: false, linkedOff: false
+        };
+
+        this.currentConfig = this.config; 
+        
+        this.aiEnabled = false;
+        this.isAiProcessing = false;
+
+        this.renderRotX = this.config.rotX;
+        this.renderRotY = this.config.rotY;
+        
+        this.turnPieceType = 'K';
+        this.availableTurnPieces = ['K', 'Q', 'R', 'B', 'N', 'P'];
+
+        this.isMenuVisible = true;
+        this.isDragging = false;
+        this.lastX = 0; this.lastY = 0;
+        this.vx = 0; this.vy = 0;
+        this.lastInteract = Date.now();
+
+        this.initDOM();
+        this.initInput();
+        this.updateUIFromConfig();
+        this.updateTurnIndicator();
+        this.loop();
+    }
+
+    toggleAiState() {
+        this.aiEnabled = !this.aiEnabled;
+        const btn = document.getElementById('ai-toggle-btn');
+        btn.textContent = this.aiEnabled ? "PAUSE AI" : "START / RESUME AI";
+        btn.className = this.aiEnabled ? "active" : "";
+        
+        if (this.aiEnabled) this.checkAiTurn();
+    }
+
+    async checkAiTurn() {
+        if (!this.aiEnabled || this.game.gameOver || this.isAiProcessing) return;
+
+        const turn = this.game.turn;
+        const mode = document.getElementById(turn + '-mode').value;
+        
+        if (mode === 'human') return; 
+
+        // Set Semaphore to block multiple AI threads
+        this.isAiProcessing = true;
+        document.getElementById('ai-thinking').style.display = 'block';
+        
+        await new Promise(r => setTimeout(r, 100));
+
+        const move = await this.ai.computeMove(this.game, mode);
+        
+        document.getElementById('ai-thinking').style.display = 'none';
+        
+        if (move) {
+            this.executeMove(move.from, move.to);
+        } else {
+            this.isAiProcessing = false; // Release lock if no move found (mate/stalemate)
+        }
+    }
+
+    cycleTurnPiece() {
+        const idx = this.availableTurnPieces.indexOf(this.turnPieceType);
+        this.turnPieceType = this.availableTurnPieces[(idx + 1) % this.availableTurnPieces.length];
+        this.updateTurnIndicator();
+    }
+
+    updateTurnIndicator() {
+        const t = this.game.turn;
+        document.getElementById('tb-white').classList.toggle('active', t==='white');
+        document.getElementById('tb-black').classList.toggle('active', t==='black');
+        document.getElementById('win-title-bar').className = `win-title turn-${t}`;
+        
+        const ind = document.getElementById('turn-piece-indicator');
+        ind.className = t; 
+        ind.textContent = SOLID_CONFIG.chars[this.turnPieceType];
+    }
+
+    initDOM() {
+        this.pivot.classList.add('notransition');
+        this.pivot.innerHTML = '';
+        this.layers = [];
+        this.cells = Array(8).fill(null).map(() => Array(8).fill(null).map(() => Array(8).fill(null)));
+        const mode = this.config.sliceMode;
+        
+        for(let i=0; i<8; i++) {
+            const layer = document.createElement('div');
+            layer.className = 'layer-plane';
+            layer.dataset.index = i;
+            this.pivot.appendChild(layer);
+            this.layers.push(layer);
+            for(let u=0; u<8; u++) {
+                for(let v=0; v<8; v++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    let l, r, f;
+                    if (mode === 0) { l = i; r = 7-u; f = v; } 
+                    else if (mode === 1) { r = i; l = 7-u; f = v; } 
+                    else if (mode === 2) { f = i; l = 7-u; r = v; }
+
+                    cell.dataset.l = l; cell.dataset.r = r; cell.dataset.f = f;
+                    const isDark = (l + r + f) % 2 !== 0; 
+                    cell.classList.add(isDark ? 'dark' : 'light');
+                    cell.onclick = (e) => {
+                        if(Math.abs(this.vx) > 0.5 || Math.abs(this.vy) > 0.5) return; 
+                        this.handleCellClick(l, r, f); e.stopPropagation();
+                    };
+                    layer.appendChild(cell);
+                    this.cells[l][r][f] = cell;
+                }
+            }
+        }
+        
+        this.updateLabels();
+        this.updateTransforms();
+        this.renderBoard();
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this.pivot.classList.remove('notransition');
+            });
+        });
+    }
+
+    updateLabels() {
+        const modes = ["LEVELS", "RANKS", "FILES"];
+        const labels = ["FOCUS LEVEL", "FOCUS RANK", "FOCUS FILE"];
+        document.getElementById('slice-mode-label').textContent = "VIEW: " + modes[this.config.sliceMode];
+        document.getElementById('focus-label').textContent = labels[this.config.sliceMode];
+        
+        const linkMainBtn = document.getElementById('link-main-btn');
+        linkMainBtn.textContent = this.config.linkedMain ? "LINK ACTIVE: ON" : "LINK ACTIVE: OFF";
+        if(this.config.linkedMain) linkMainBtn.classList.add('active'); else linkMainBtn.classList.remove('active');
+
+        const linkOffBtn = document.getElementById('link-off-btn');
+        linkOffBtn.textContent = this.config.linkedOff ? "LINK OFF: ON" : "LINK OFF: OFF";
+        if(this.config.linkedOff) linkOffBtn.classList.add('active'); else linkOffBtn.classList.remove('active');
+    }
+
+    updateUIFromConfig() {
+        const c = this.config;
+        document.getElementById('level-slider').value = c.focusLevel;
+        document.getElementById('lvl-display').textContent = c.focusLevel;
+        document.getElementById('spacing-slider').value = c.layerSpacing;
+        
+        document.getElementById('main-bg-opacity-slider').value = c.mainBgAlpha;
+        document.getElementById('main-bg-op-val').textContent = c.mainBgAlpha;
+        document.getElementById('main-piece-opacity-slider').value = c.mainPieceAlpha;
+        document.getElementById('main-piece-op-val').textContent = c.mainPieceAlpha;
+        
+        document.getElementById('bg-opacity-slider').value = c.bgAlpha;
+        document.getElementById('bg-op-val').textContent = c.bgAlpha;
+        document.getElementById('piece-opacity-slider').value = c.pieceAlpha;
+        document.getElementById('piece-op-val').textContent = c.pieceAlpha;
+        
+        document.getElementById('opaque-check').checked = c.opaqueClick;
+        document.getElementById('explode-slider').value = c.explodeGap;
+        document.getElementById('explode-val').textContent = c.explodeGap;
+        document.getElementById('autorotate-check').checked = c.autoRotate;
+
+        document.documentElement.style.setProperty('--main-bg-alpha', c.mainBgAlpha / 100);
+        document.documentElement.style.setProperty('--main-piece-alpha', c.mainPieceAlpha / 100);
+        document.documentElement.style.setProperty('--bg-alpha', c.bgAlpha / 100);
+        document.documentElement.style.setProperty('--piece-alpha', c.pieceAlpha / 100);
+        document.documentElement.style.setProperty('--grid-gap', `${c.explodeGap}px`);
+        this.updateLabels();
+    }
+
+    updateTransforms() {
+        const c = this.config;
+        const mode = c.sliceMode;
+        this.layers.forEach((layer, i) => {
+            const zPos = (i - 3.5) * c.layerSpacing;
+            let transform = "";
+            const totalWidth = (8 * 35) + (7 * c.explodeGap);
+            layer.style.marginLeft = `-${totalWidth / 2}px`;
+            layer.style.marginTop = `-${totalWidth / 2}px`;
+
+            if (mode === 0) transform = `translateZ(${zPos}px)`;
+            else if (mode === 1) transform = `rotateX(90deg) translateZ(${zPos}px)`;
+            else if (mode === 2) transform = `rotateY(90deg) translateZ(${zPos}px)`;
+            
+            layer.style.transform = transform;
+            const dist = Math.abs(i - c.focusLevel);
+            const isActive = (dist === 0);
+            layer.dataset.active = isActive;
+            layer.style.pointerEvents = (isActive || c.opaqueClick) ? 'auto' : 'none';
+        });
+        document.getElementById('scene-container').style.transform = `scale(${c.zoomLevel})`;
+    }
+
+    renderBoard() {
+        document.querySelectorAll('.check-indicator').forEach(e => e.remove());
+
+        for(let l=0; l<8; l++) for(let r=0; r<8; r++) for(let f=0; f<8; f++) {
+            const cell = this.cells[l][r][f];
+            const p = this.game.board[l][r][f];
+            const isDark = (l+r+f)%2 !== 0;
+            cell.className = `cell ${isDark ? 'dark' : 'light'}`;
+            cell.innerHTML = '';
+            
+            if (this.game.lastMove) {
+                const lm = this.game.lastMove;
+                if ((lm.from.l === l && lm.from.r === r && lm.from.f === f) ||
+                    (lm.to.l === l && lm.to.r === r && lm.to.f === f)) {
+                    cell.classList.add('last-move');
+                }
+            }
+
+            if(p) {
+                const span = document.createElement('span');
+                span.className = `piece ${p.color}`;
+                span.textContent = SOLID_CONFIG.chars[p.type];
+                cell.appendChild(span);
+
+                if (p.type === 'K' && this.game.checks[p.color].has(p.id)) {
+                    const ind = document.createElement('div');
+                    ind.className = 'check-indicator';
+                    ind.textContent = '!';
+                    cell.appendChild(ind);
+                }
+            }
+        }
+        if(this.selected) {
+            this.cells[this.selected.l][this.selected.r][this.selected.f].classList.add('selected');
+        }
+        this.highlights.forEach(h => {
+            const hc = this.cells[h.l][h.r][h.f];
+            if(h.capture) hc.classList.add('capture-move');
+            else hc.classList.add('valid-move');
+        });
+    }
+
+    executeMove(from, to) {
+        const result = this.game.move(from, to);
+        this.selected = null; this.highlights = [];
+        this.renderBoard(); 
+        
+        this.updateTurnIndicator();
+        
+        // Release lock
+        this.isAiProcessing = false;
+
+        if(result.gameOver) {
+            document.getElementById('game-status').textContent = `GAME OVER! ${result.winner.toUpperCase()} WINS`;
+            document.getElementById('game-status').style.background = '#ff0';
+        } else {
+            const isCheck = this.game.checks[this.game.turn].size > 0;
+            document.getElementById('game-status').textContent = isCheck ? "CHECK!" : "PLAYER SWITCHING...";
+            
+            // Loop for AI vs AI or AI response
+            if (this.aiEnabled) setTimeout(() => this.checkAiTurn(), 100);
+        }
+    }
+
+    handleCellClick(l, r, f) {
+        if(this.game.gameOver || this.isAiProcessing) return;
+        
+        // Ensure human only plays for human
+        const currentMode = document.getElementById(this.game.turn + '-mode').value;
+        if(currentMode !== 'human') return; 
+
+        const move = this.highlights.find(m => m.l===l && m.r===r && m.f===f);
+        if(move && this.selected) {
+            this.executeMove(this.selected, move);
+            return;
+        }
+        const p = this.game.board[l][r][f];
+        if(p && p.color === this.game.turn) {
+            this.selected = {l,r,f};
+            this.highlights = this.game.getMoves(l,r,f);
+            this.renderBoard();
+            document.getElementById('game-status').textContent = `SELECTED ${p.type}`;
+        } else {
+            this.selected = null; this.highlights = [];
+            this.renderBoard();
+        }
+    }
+
+    toggleMenu() {
+        this.isMenuVisible = !this.isMenuVisible;
+        const ui = document.getElementById('main-ui');
+        if(!this.isMenuVisible) ui.classList.add('hidden');
+        else ui.classList.remove('hidden');
+    }
+
+    toggleLinkMain() {
+        this.config.linkedMain = !this.config.linkedMain;
+        if(this.config.linkedMain) {
+            this.config.mainPieceAlpha = this.config.mainBgAlpha;
+            this.updateUIFromConfig();
+        }
+        this.updateLabels(); 
+    }
+
+    toggleLinkOff() {
+        this.config.linkedOff = !this.config.linkedOff;
+        if(this.config.linkedOff) {
+            this.config.pieceAlpha = this.config.bgAlpha;
+            this.updateUIFromConfig();
+        }
+        this.updateLabels(); 
+    }
+
+    initInput() {
+        const scene = document.getElementById('scene-container');
+        window.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            this.config.sliceMode = (this.config.sliceMode + 1) % 3;
+            this.initDOM(); 
+        });
+
+        window.addEventListener('wheel', (e) => {
+            if (e.deltaY < 0) this.config.focusLevel = Math.min(7, this.config.focusLevel + 1);
+            else if (e.deltaY > 0) this.config.focusLevel = Math.max(0, this.config.focusLevel - 1);
+            document.getElementById('level-slider').value = this.config.focusLevel;
+            document.getElementById('lvl-display').textContent = this.config.focusLevel;
+            this.updateTransforms();
+        }, { passive: true });
+
+        const updateOpacity = (val, key) => {
+            this.config[key] = val;
+            if (this.config.linkedMain && (key === 'mainBgAlpha' || key === 'mainPieceAlpha')) {
+                this.config.mainBgAlpha = val;
+                this.config.mainPieceAlpha = val;
+            }
+            if (this.config.linkedOff && (key === 'bgAlpha' || key === 'pieceAlpha')) {
+                this.config.bgAlpha = val;
+                this.config.pieceAlpha = val;
+            }
+            this.updateUIFromConfig();
+        };
+
+        const bind = (id, key, fn) => {
+            document.getElementById(id).addEventListener('input', (e) => {
+                const val = e.target.type === 'checkbox' ? e.target.checked : parseFloat(e.target.value);
+                if (['mainBgAlpha', 'mainPieceAlpha', 'bgAlpha', 'pieceAlpha'].includes(key)) {
+                    updateOpacity(val, key);
+                } else {
+                    this.config[key] = val;
+                }
+                if(fn) fn(val);
+                this.updateTransforms();
+            });
+        };
+
+        bind('level-slider', 'focusLevel', (v) => { document.getElementById('lvl-display').textContent = v; this.updateTransforms(); });
+        bind('spacing-slider', 'layerSpacing');
+        bind('explode-slider', 'explodeGap', (v) => { document.getElementById('explode-val').textContent = v; document.documentElement.style.setProperty('--grid-gap', `${v}px`); });
+        
+        bind('main-bg-opacity-slider', 'mainBgAlpha');
+        bind('main-piece-opacity-slider', 'mainPieceAlpha');
+        bind('bg-opacity-slider', 'bgAlpha');
+        bind('piece-opacity-slider', 'pieceAlpha');
+        
+        bind('opaque-check', 'opaqueClick');
+        bind('autorotate-check', 'autoRotate');
+
+        const start = (x, y) => { this.isDragging=true; this.lastX=x; this.lastY=y; this.lastInteract=Date.now(); document.getElementById('auto-pilot-label').style.display='none'; this.vx=0; this.vy=0; };
+        const move = (x, y) => {
+            if(!this.isDragging) return;
+            const dx = x - this.lastX; const dy = y - this.lastY;
+            this.config.rotY += dx * 0.3; 
+            this.config.rotX -= dy * 0.3; 
+            this.config.rotX = Math.max(-90, Math.min(90, this.config.rotX));
+            this.vx = dx * 0.3; this.vy = dy * 0.3;
+            this.lastX = x; this.lastY = y; this.lastInteract = Date.now();
+        };
+        const end = () => { this.isDragging=false; };
+
+        scene.addEventListener('mousedown', e => start(e.clientX, e.clientY));
+        window.addEventListener('mousemove', e => move(e.clientX, e.clientY));
+        window.addEventListener('mouseup', end);
+        scene.addEventListener('touchstart', e => start(e.touches[0].clientX, e.touches[0].clientY));
+        window.addEventListener('touchmove', e => move(e.touches[0].clientX, e.touches[0].clientY));
+        window.addEventListener('touchend', end);
+    }
+
+    zoom(delta) {
+        this.config.zoomLevel = Math.max(0.2, Math.min(2.0, this.config.zoomLevel + delta));
+        this.updateTransforms(); 
+    }
+    resetView() {
+        this.config.rotX = -20; this.config.rotY = 30; this.config.zoomLevel = 1.0;
+        this.updateTransforms(); 
+    }
+
+    loop() {
+        const now = Date.now();
+        const c = this.config;
+        
+        if(!this.isDragging) {
+            c.rotY += this.vx; c.rotX -= this.vy;
+            c.rotX = Math.max(-90, Math.min(90, c.rotX));
+            this.vx *= 0.95; this.vy *= 0.95;
+            if (c.autoRotate && (now - this.lastInteract > 3000)) {
+                c.rotY += 0.1;
+                document.getElementById('auto-pilot-label').style.display = 'block';
+            }
+        }
+
+        const lerp = (start, end, t) => start * (1 - t) + end * t;
+        this.renderRotX = lerp(this.renderRotX, c.rotX, 0.1);
+        this.renderRotY = lerp(this.renderRotY, c.rotY, 0.1);
+
+        this.pivot.style.transform = `rotateX(${this.renderRotX}deg) rotateY(${this.renderRotY}deg)`;
+        requestAnimationFrame(() => this.loop());
+    }
+}
+
+const gameLogic = new ChessLogic();
+const visuals = new VisualEngine(gameLogic);
+const game = {
+    resetGame: () => {
+        location.reload(); 
+    }
+};
+</script>
+</body>
+</html>
